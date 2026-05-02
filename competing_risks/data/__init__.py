@@ -1,4 +1,4 @@
-"""Datasets and simulation generators for CompSoft experiments."""
+"""Datasets and simulation generators for SoftComp experiments."""
 
 from .case1 import generate_case1
 from .case2 import generate_case2

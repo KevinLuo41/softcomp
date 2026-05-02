@@ -1,7 +1,7 @@
-"""CompSoft @ Case I."""
+"""SoftComp @ Case I."""
 
 from competing_risks.data.case1 import generate_case1
-from competing_risks.experiments.runner import cli_main, make_compsoft_spec
+from competing_risks.experiments.runner import cli_main, make_softcomp_spec
 
 
 def load_data(args):
@@ -11,7 +11,7 @@ def load_data(args):
 
 
 def model_spec_factory(data):
-    return make_compsoft_spec(
+    return make_softcomp_spec(
         hidden_dim=16,
         num_blocks=1,
         dropout=0.0,

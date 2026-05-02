@@ -179,3 +179,44 @@ def evaluate_survival(
     metrics["ctd_mean"] = float(np.mean(ctd_values)) if ctd_values else float("nan")
     metrics["ibs_mean"] = float(np.mean(ibs_values)) if ibs_values else float("nan")
     return metrics
+
+
+def compute_ctd(Y_test: Any, Delta_test: Any, cif_pred: Any, times: Any, event_k: int) -> float:
+    """Blueprint-compatible alias for Antolini time-dependent concordance."""
+    cif = np.asarray(cif_pred, dtype=float)
+    return concordance_td(cif[:, event_k - 1, :], Y_test, Delta_test, times, event_k)
+
+
+def compute_ibs(
+    Y_test: Any,
+    Delta_test: Any,
+    Y_train: Any,
+    Delta_train: Any,
+    cif_pred: Any,
+    times: Any,
+    event_k: int,
+) -> float:
+    """Blueprint-compatible alias for IPCW integrated Brier score."""
+    cif = np.asarray(cif_pred, dtype=float)
+    return integrated_brier_score(
+        cif[:, event_k - 1, :], Y_test, Delta_test, Y_train, Delta_train, times, event_k
+    )
+
+
+def evaluate_cif_metrics(
+    cif_pred: Any,
+    Y_test: Any,
+    Delta_test: Any,
+    Y_train: Any,
+    Delta_train: Any,
+    times: Any,
+    K: int,
+) -> Dict[str, float]:
+    """Return blueprint-style metric keys plus the package's lowercase aliases."""
+    metrics = evaluate_survival(cif_pred, Y_test, Delta_test, times, Y_train, Delta_train, K)
+    for cause in range(1, K + 1):
+        metrics[f"Ctd_cause_{cause}"] = metrics[f"ctd_cause_{cause}"]
+        metrics[f"IBS_cause_{cause}"] = metrics[f"ibs_cause_{cause}"]
+    metrics["Ctd_overall"] = metrics["ctd_mean"]
+    metrics["IBS_overall"] = metrics["ibs_mean"]
+    return metrics

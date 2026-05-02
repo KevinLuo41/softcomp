@@ -155,6 +155,65 @@ def assert_monotone(cif: Any, tol: float = 1e-8) -> None:
         raise ValueError("CIF is not monotone along the time axis")
 
 
+def assert_monotone_cif(
+    cif_fn: Callable[[np.ndarray, np.ndarray], Any],
+    x_sample: Any,
+    t_grid: Any,
+    atol: float = 1e-6,
+) -> None:
+    """Blueprint-compatible true-CIF monotonicity check for a DGP function."""
+    x_arr = np.asarray(x_sample, dtype=float)
+    times = np.asarray(t_grid, dtype=float)
+    values = []
+    for t in times:
+        t_vec = np.full(x_arr.shape[0], float(t))
+        out = cif_fn(x_arr, t_vec)
+        cif = out[0] if isinstance(out, tuple) else out
+        values.append(np.asarray(cif, dtype=float)[..., None])
+    assert_monotone(np.concatenate(values, axis=-1), tol=atol)
+
+
+def assign_causes_and_censor(
+    x: Any,
+    t_event: Any,
+    cif_fn: Callable[[np.ndarray, np.ndarray], Any],
+    censor_rate: float,
+    seed: int = 0,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Draw causes at event times and apply exponential censoring."""
+    rng = rng_from_seed(seed)
+    x_arr = np.asarray(x, dtype=float)
+    event_times = np.asarray(t_event, dtype=float)
+    out = cif_fn(x_arr, event_times)
+    cif_at_time = out[0] if isinstance(out, tuple) else out
+    causes = assign_causes(cif_at_time, rng)
+    y, delta, _, _ = apply_exponential_censoring(event_times, causes, censor_rate, rng)
+    return y, delta, causes
+
+
+def generate_test_observations(
+    n_test: int,
+    p: int,
+    cif_fn: Callable[[np.ndarray, np.ndarray], Any],
+    censor_rate: float,
+    seed: int = 0,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate generic Gaussian test observations from a CIF function."""
+    rng = rng_from_seed(seed)
+    x = rng.normal(size=(n_test, p))
+
+    def mu_adapter(x_batch: np.ndarray, t_batch: np.ndarray) -> np.ndarray:
+        out = cif_fn(x_batch, t_batch)
+        cif = out[0] if isinstance(out, tuple) else out
+        survival = np.maximum(1.0 - np.sum(cif, axis=1, keepdims=True), EPS)
+        return np.log(np.maximum(cif, EPS) / survival)
+
+    _, y, delta, _, _ = sample_competing_risks(
+        x, mu_adapter, rng, target_censoring=censor_rate, t_upper=30.0
+    )
+    return x, y, delta
+
+
 def split_indices(n: int, test_size: float = 0.3, seed: int = 42) -> Tuple[np.ndarray, np.ndarray]:
     rng = rng_from_seed(seed)
     idx = rng.permutation(n)
@@ -252,6 +311,9 @@ def dataset_dict(
         "Y_test": np.asarray(Y_test, dtype=float),
         "Delta_test": np.asarray(Delta_test, dtype=int),
         "num_causes": int(num_causes),
+        "K": int(num_causes),
+        "P": int(np.asarray(X_train).shape[1]) if np.asarray(X_train).ndim >= 2 else 1,
+        "events": tuple(range(1, int(num_causes) + 1)),
         "feature_names": feature_names,
     }
     result.update(metadata)

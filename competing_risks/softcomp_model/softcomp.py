@@ -1,9 +1,9 @@
-"""CompSoft scalar-covariate model, losses, fitting, and prediction."""
+"""SoftComp scalar-covariate model, losses, fitting, and prediction."""
 
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -45,7 +45,7 @@ def competing_risks_loss(
 
 
 class ResidualBlock(nn.Module):
-    """Residual MLP block used by CompSoft."""
+    """Residual MLP block used by SoftComp."""
 
     def __init__(self, dim: int):
         super().__init__()
@@ -59,8 +59,8 @@ class ResidualBlock(nn.Module):
         return x + self.net(x)
 
 
-class BaseCompSoftNet(nn.Module):
-    """Common training and prediction utilities for CompSoft variants."""
+class BaseSoftCompNet(nn.Module):
+    """Common training and prediction utilities for SoftComp variants."""
 
     num_causes: int
 
@@ -159,7 +159,7 @@ class BaseCompSoftNet(nn.Module):
         verbose: bool = True,
         device: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Fit CompSoft using NLL, time augmentation, and optional Brier loss."""
+        """Fit SoftComp using NLL, time augmentation, and optional Brier loss."""
         dev = _resolve_device(device)
         self.to(dev)
         x_train = _as_float_tensor(X_train, dev)
@@ -261,8 +261,8 @@ class BaseCompSoftNet(nn.Module):
         return history
 
 
-class CompSoftNet(BaseCompSoftNet):
-    """Scalar-input CompSoft network."""
+class SoftCompNet(BaseSoftCompNet):
+    """Scalar-input SoftComp network."""
 
     def __init__(
         self,
@@ -291,6 +291,37 @@ class CompSoftNet(BaseCompSoftNet):
         self.backbone = nn.Sequential(*backbone)
         self.output_layer = nn.Linear(self.hidden_dim, self.num_causes)
 
+    @property
+    def model_config(self) -> Dict[str, Any]:
+        return {
+            "input_dim": self.input_dim,
+            "num_causes": self.num_causes,
+            "hidden_dim": self.hidden_dim,
+            "num_blocks": self.num_blocks,
+            "dropout": self.dropout,
+        }
+
+    def checkpoint_dict(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return {
+            "class": self.__class__.__name__,
+            "config": self.model_config,
+            "state_dict": self.state_dict(),
+            "metadata": metadata or {},
+        }
+
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint: Dict[str, Any]) -> "SoftCompNet":
+        config = checkpoint.get("config") or checkpoint.get("model_config")
+        if config is None:
+            metadata = checkpoint.get("metadata", {})
+            config = metadata.get("config") or metadata.get("model_config")
+        if config is None:
+            raise ValueError("Checkpoint does not include a SoftCompNet config")
+        model = cls(**config)
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        model.load_state_dict(state_dict)
+        return model
+
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         if t.dim() == 0:
             t = t.expand(x.shape[0])
@@ -300,3 +331,85 @@ class CompSoftNet(BaseCompSoftNet):
         h = self.input_proj(xt)
         h = self.backbone(h)
         return self.output_layer(h)
+
+
+class SoftCompEnsemble(nn.Module):
+    """Average CIF predictions across SoftComp members with optional shrinkage."""
+
+    def __init__(
+        self,
+        members: Iterable[BaseSoftCompNet],
+        alpha_per_cause: Optional[Sequence[float]] = None,
+        marginal_per_cause: Optional[Sequence[float]] = None,
+    ):
+        super().__init__()
+        self.members = nn.ModuleList(list(members))
+        if len(self.members) == 0:
+            raise ValueError("SoftCompEnsemble requires at least one member")
+        self.num_causes = int(self.members[0].num_causes)
+        for member in self.members:
+            if int(member.num_causes) != self.num_causes:
+                raise ValueError("All ensemble members must share num_causes")
+        if alpha_per_cause is None:
+            alpha = torch.ones(self.num_causes, dtype=torch.float32)
+        else:
+            alpha = torch.as_tensor(alpha_per_cause, dtype=torch.float32)
+            if alpha.numel() != self.num_causes:
+                raise ValueError("alpha_per_cause must have length num_causes")
+        if marginal_per_cause is None:
+            marginal = torch.zeros(self.num_causes, dtype=torch.float32)
+        else:
+            marginal = torch.as_tensor(marginal_per_cause, dtype=torch.float32)
+            if marginal.numel() != self.num_causes:
+                raise ValueError("marginal_per_cause must have length num_causes")
+        self.register_buffer("alpha_per_cause", alpha.reshape(1, -1))
+        self.register_buffer("marginal_per_cause", marginal.reshape(1, -1))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("SoftCompEnsemble exposes predict_cif and predict_cif_grid, not logits")
+
+    @torch.no_grad()
+    def predict_cif(self, x: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        cifs = []
+        for member in self.members:
+            member_cif, _ = member.predict_cif(x, t)
+            cifs.append(member_cif)
+        avg = torch.stack(cifs, dim=0).mean(dim=0)
+        alpha = self.alpha_per_cause.to(device=avg.device, dtype=avg.dtype)
+        marginal = self.marginal_per_cause.to(device=avg.device, dtype=avg.dtype)
+        cif = alpha * avg + (1.0 - alpha) * marginal
+        cif = torch.clamp(cif, 0.0, 1.0)
+        survival = torch.clamp(1.0 - cif.sum(dim=1), 0.0, 1.0)
+        return cif, survival
+
+    @torch.no_grad()
+    def predict_cif_grid(
+        self,
+        x: Any,
+        t_grid: Any,
+        batch_size: int = 4096,
+        device: Optional[Any] = None,
+        as_numpy: bool = True,
+    ) -> Tuple[Any, Any]:
+        dev = _resolve_device(device)
+        self.to(dev)
+        x_tensor = _as_float_tensor(x, dev)
+        t_tensor = _as_float_tensor(t_grid, dev).flatten()
+        cif_chunks = []
+        surv_chunks = []
+        for start in range(0, x_tensor.shape[0], batch_size):
+            xb = x_tensor[start : start + batch_size]
+            batch_cifs = []
+            batch_surv = []
+            for tj in t_tensor:
+                tt = tj.expand(xb.shape[0])
+                fj, sj = self.predict_cif(xb, tt)
+                batch_cifs.append(fj.unsqueeze(-1))
+                batch_surv.append(sj.unsqueeze(-1))
+            cif_chunks.append(torch.cat(batch_cifs, dim=-1).cpu())
+            surv_chunks.append(torch.cat(batch_surv, dim=-1).cpu())
+        cif = torch.cat(cif_chunks, dim=0)
+        survival = torch.cat(surv_chunks, dim=0)
+        if as_numpy:
+            return cif.numpy(), survival.numpy()
+        return cif, survival

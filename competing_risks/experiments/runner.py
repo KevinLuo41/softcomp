@@ -1,4 +1,4 @@
-"""Shared experiment scaffold for all CompSoft reproductions."""
+"""Shared experiment scaffold for all SoftComp reproductions."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Optional
 import numpy as np
 import torch
 
-from competing_risks.compsoft_model import CompSoftNet, FunctionalCompSoftNet
+from competing_risks.softcomp_model import SoftCompNet, FunctionalSoftCompNet
 from competing_risks.evaluation.checkpoints import (
     load_model_checkpoint,
     save_json,
@@ -39,14 +39,14 @@ def set_torch_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def make_compsoft_spec(
+def make_softcomp_spec(
     hidden_dim: int,
     num_blocks: int,
     dropout: float,
     fit_kwargs: Dict[str, Any],
 ) -> ModelSpec:
     def build(data: Dict[str, Any]):
-        return CompSoftNet(
+        return SoftCompNet(
             input_dim=data["X_train"].shape[1],
             num_causes=data["num_causes"],
             hidden_dim=hidden_dim,
@@ -55,14 +55,14 @@ def make_compsoft_spec(
         )
 
     return ModelSpec(
-        name="compsoft",
+        name="softcomp",
         build_model=build,
         fit_kwargs=fit_kwargs,
         post_process=lambda cif, t_grid: isotonic_project_cif(cif, t_grid),
     )
 
 
-def make_functional_compsoft_spec(
+def make_functional_softcomp_spec(
     hidden_dim: int,
     num_blocks: int,
     embed_dim: int,
@@ -71,7 +71,7 @@ def make_functional_compsoft_spec(
 ) -> ModelSpec:
     def build(data: Dict[str, Any]):
         x = data["X_train"]
-        return FunctionalCompSoftNet(
+        return FunctionalSoftCompNet(
             num_covariates=x.shape[1],
             n_grid=x.shape[2],
             embed_dim=embed_dim,
@@ -82,7 +82,7 @@ def make_functional_compsoft_spec(
         )
 
     return ModelSpec(
-        name="compsoft",
+        name="softcomp",
         build_model=build,
         fit_kwargs=fit_kwargs,
         post_process=lambda cif, t_grid: isotonic_project_cif(cif, t_grid),
@@ -120,6 +120,8 @@ def run_experiment(
     n_grid: int = 100,
     percentile_cap: float = 90.0,
     force: bool = False,
+    force_train: Optional[bool] = None,
+    force_eval: Optional[bool] = None,
     device: Optional[str] = None,
     epochs_override: Optional[int] = None,
     batch_size_override: Optional[int] = None,
@@ -135,6 +137,8 @@ def run_experiment(
     history_path = out_dir / "history.pkl"
 
     model = model_spec.build_model(data)
+    force_train = force if force_train is None else force_train
+    force_eval = force if force_eval is None else force_eval
     fit_kwargs = dict(model_spec.fit_kwargs)
     fit_kwargs.pop("seed", None)
     if epochs_override is not None:
@@ -144,7 +148,7 @@ def run_experiment(
     if device is not None:
         fit_kwargs["device"] = device
 
-    if force or not model_path.exists():
+    if force_train or not model_path.exists():
         history = model.fit(
             data["X_train"],
             data["Y_train"],
@@ -161,7 +165,7 @@ def run_experiment(
         load_model_checkpoint(model, model_path, map_location=device or "cpu")
         history = getattr(model, "history_", {})
 
-    if force or not pred_path.exists():
+    if force_eval or force_train or not pred_path.exists():
         t_grid = build_evaluation_time_grid(
             data["Y_test"],
             data["Delta_test"],
@@ -218,10 +222,13 @@ def run_experiment(
 
 
 def build_parser(dataset_name: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=f"Run CompSoft on {dataset_name}")
+    parser = argparse.ArgumentParser(description=f"Run SoftComp on {dataset_name}")
     parser.add_argument("--output-dir", default="outputs")
     parser.add_argument("--data-path", default=None, help="CSV path for real-data experiments")
     parser.add_argument("--force", action="store_true", help="Retrain and recompute predictions")
+    parser.add_argument("--retrain", nargs="*", default=[], help="Retrain named model(s)")
+    parser.add_argument("--reeval", nargs="*", default=[], help="Recompute predictions and metrics")
+    parser.add_argument("--list", action="store_true", help="Show cache state and exit")
     parser.add_argument("--quick", action="store_true", help="Small smoke run with fewer samples/epochs")
     parser.add_argument("--quick-epochs", type=int, default=3)
     parser.add_argument("--epochs", type=int, default=None, help="Override configured epochs")
@@ -244,6 +251,22 @@ def cli_main(
     if args.quick:
         data = subset_dataset(data)
     model_spec = model_spec_factory(data)
+    out_dir = Path(args.output_dir) / dataset_name / model_spec.name
+    train_targets = {token.lower() for token in args.retrain}
+    eval_targets = {token.lower() for token in args.reeval}
+    force_train = args.force or "all" in train_targets or model_spec.name.lower() in train_targets
+    force_eval = (
+        args.force
+        or force_train
+        or "all" in eval_targets
+        or model_spec.name.lower() in eval_targets
+    )
+    if args.list:
+        print(f"{model_spec.name}:")
+        print(f"  model: {'hit' if (out_dir / 'model.pt').exists() else 'miss'}")
+        print(f"  predictions: {'hit' if (out_dir / 'predictions.npz').exists() else 'miss'}")
+        print(f"  metrics: {'hit' if (out_dir / 'metrics.json').exists() else 'miss'}")
+        return {"model_spec": model_spec, "output_dir": out_dir}
     epochs_override = args.quick_epochs if args.quick else args.epochs
     result = run_experiment(
         dataset_name,
@@ -253,6 +276,8 @@ def cli_main(
         n_grid=args.n_grid,
         percentile_cap=args.percentile_cap,
         force=args.force,
+        force_train=force_train,
+        force_eval=force_eval,
         device=args.device,
         epochs_override=epochs_override,
         batch_size_override=args.batch_size,

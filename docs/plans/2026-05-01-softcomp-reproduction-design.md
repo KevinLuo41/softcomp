@@ -1,8 +1,8 @@
-# CompSoft Reproduction Design
+# SoftComp Reproduction Design
 
 ## Goal
 
-Reconstruct the CompSoft competing-risks project from the supplied HTML blueprint.
+Reconstruct the SoftComp competing-risks project from the supplied HTML blueprint.
 The repository should match the documented file structure and provide runnable
 implementations for the model, training loop, postprocessing, simulation data,
 real-data loader hooks, metrics, visualization, checkpoints, and six experiment
@@ -13,15 +13,17 @@ entry points.
 The HTML is a blueprint, not a source archive. The reconstruction therefore
 targets 1:1 public structure and behavior from the document:
 
-- `competing_risks/compsoft_model/` implements `CompSoftNet`,
-  `BaseCompSoftNet`, `FunctionalCompSoftNet`, NLL loss, time augmentation,
-  Brier-augmented training, fitting, and CIF prediction.
+- `competing_risks/softcomp_model/` implements `SoftCompNet`,
+  `BaseSoftCompNet`, `FunctionalSoftCompNet`, `SoftCompEnsemble`, NLL loss,
+  time augmentation, Brier-augmented training, fitting, and CIF prediction.
+- `competing_risks/baseline_models/` implements runnable DeepHit, DSM,
+  cause-specific Cox, and Neural Fine-Gray API-compatible baselines.
 - `competing_risks/data/` implements simulation cases I/II/III plus loaders
   for PBC, Framingham, and Synthetic data with the preprocessing described in
   the blueprint.
 - `competing_risks/evaluation/` implements simulation MSE/accuracy, IPCW IBS,
   Antolini-style time-dependent concordance, isotonic projection, checkpoints,
-  and plots.
+  monotonicity diagnostics, checkpoints, and plots.
 - `competing_risks/experiments/` implements shared experiment plumbing and one
   `run.py` for each of the six datasets.
 
@@ -40,7 +42,7 @@ expected path and columns.
 
 ## Model Contract
 
-The scalar CompSoft model consumes `(x, t)` and outputs `K` logits. A zero logit is
+The scalar SoftComp model consumes `(x, t)` and outputs `K` logits. A zero logit is
 prepended as the survival class, then softmax produces `(F_1, ..., F_K, S)`.
 The functional model embeds each functional covariate over its grid, appends
 time, and uses the same residual backbone.

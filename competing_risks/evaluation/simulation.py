@@ -36,3 +36,20 @@ def evaluate_simulation(
     metrics = mse_by_cause(pred_cif, true_cif)
     metrics["accuracy"] = classification_accuracy(pred_cif, pred_survival, true_cif)
     return metrics
+
+
+def compute_mse_accuracy(
+    cif_pred: Any,
+    X_test: Any,
+    times: Any,
+    true_cif_fn,
+    K: int | None = None,
+) -> Dict[str, float]:
+    """Blueprint-compatible wrapper for simulation MSE and accuracy."""
+    true_cif, _ = true_cif_fn(X_test, times)
+    pred = np.asarray(cif_pred, dtype=float)
+    survival = 1.0 - np.sum(pred, axis=1)
+    if K is not None:
+        pred = pred[:, :K, :]
+        true_cif = true_cif[:, :K, :]
+    return evaluate_simulation(pred, survival, true_cif)

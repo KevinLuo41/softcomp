@@ -1,2 +1,2 @@
-"""Experiment entry points for CompSoft reproduction."""
+"""Experiment entry points for SoftComp reproduction."""
 

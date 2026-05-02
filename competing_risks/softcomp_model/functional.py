@@ -1,15 +1,15 @@
-"""Functional-covariate CompSoft model for Case III."""
+"""Functional-covariate SoftComp model for Case III."""
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from .compsoft import BaseCompSoftNet, ResidualBlock
+from .softcomp import BaseSoftCompNet, ResidualBlock
 
 
-class FunctionalCompSoftNet(BaseCompSoftNet):
-    """CompSoft variant for covariates observed on a function grid."""
+class FunctionalSoftCompNet(BaseSoftCompNet):
+    """SoftComp variant for covariates observed on a function grid."""
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class FunctionalCompSoftNet(BaseCompSoftNet):
         if x.dim() == 2 and x.shape[1] == self.num_covariates * self.n_grid:
             return x.reshape(x.shape[0], self.num_covariates, self.n_grid)
         if x.dim() != 3:
-            raise ValueError("FunctionalCompSoftNet expects X with shape (n, p, G)")
+            raise ValueError("FunctionalSoftCompNet expects X with shape (n, p, G)")
         if x.shape[1] != self.num_covariates or x.shape[2] != self.n_grid:
             raise ValueError(
                 f"Expected X shape (n, {self.num_covariates}, {self.n_grid}); got {tuple(x.shape)}"

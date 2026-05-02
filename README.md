@@ -1,14 +1,19 @@
-# CompSoft Competing Risks
+# SoftComp Competing Risks
 
-This repository reconstructs the CompSoft competing-risks project from the
+This repository reconstructs the SoftComp competing-risks project from the
 provided reproduction blueprint.
 
 The implemented file structure mirrors the blueprint:
 
 ```text
 competing_risks/
-├── compsoft_model/
-│   ├── compsoft.py
+├── baseline_models/
+│   ├── deephit.py
+│   ├── dsm.py
+│   ├── cs_cox.py
+│   └── neural_fine_gray.py
+├── softcomp_model/
+│   ├── softcomp.py
 │   ├── functional.py
 │   └── __init__.py
 ├── evaluation/
@@ -35,6 +40,7 @@ competing_risks/
 │   ├── framingham/run.py
 │   └── synthetic/run.py
 └── README.md
+cuda_check.py
 ```
 
 ## Install
@@ -50,6 +56,15 @@ python3 -m competing_risks.experiments.case1.run --quick --quick-epochs 3 --forc
 python3 -m competing_risks.experiments.case2.run --quick --quick-epochs 3 --force
 python3 -m competing_risks.experiments.case3.run --quick --quick-epochs 3 --force
 python3 -m competing_risks.experiments.synthetic.run --quick --quick-epochs 3 --force
+python3 cuda_check.py
+```
+
+The local CLI also accepts the blueprint-style cache controls:
+
+```bash
+python3 -m competing_risks.experiments.case1.run --list
+python3 -m competing_risks.experiments.case1.run --retrain softcomp
+python3 -m competing_risks.experiments.case1.run --reeval softcomp
 ```
 
 ## Full reproduction runs
@@ -76,13 +91,18 @@ that file is empty, the loader generates a deterministic DeepHit-like fallback:
 python3 -m competing_risks.experiments.synthetic.run --force
 ```
 
-Outputs are written to `outputs/<dataset>/compsoft/`:
+Outputs are written to `outputs/<dataset>/softcomp/`:
 
 - `model.pt`
 - `predictions.npz`
 - `metrics.json`
 - `history.pkl`
 - optional plots
+
+The documented baseline modules are present under `competing_risks/baseline_models/`
+with matching `fit`, `predict_cif`, and `load_from_checkpoint` APIs. They use a
+lightweight empirical CIF estimator so the repository stays runnable with only
+the dependencies in `requirements.txt`.
 
 ## Tests
 
