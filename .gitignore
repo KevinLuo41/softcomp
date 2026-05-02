@@ -214,5 +214,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# CRSoft experiment artifacts
+outputs/
+outputs_smoke/
+
 # Streamlit
 .streamlit/secrets.toml
